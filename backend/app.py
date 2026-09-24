@@ -141,5 +141,19 @@ def complete_task(task_id):
     return jsonify(updated)
 
 
+@app.delete("/api/tasks/<task_id>")
+@require_auth
+def delete_task(task_id):
+    """Only the creator of a task can delete it."""
+    task = supabase.table("tasks").select("*").eq("id", task_id).single().execute().data
+    if not task:
+        return jsonify({"error": "task not found"}), 404
+    if task["created_by"] != g.user_id:
+        return jsonify({"error": "only the creator can delete this task"}), 403
+
+    supabase.table("tasks").delete().eq("id", task_id).execute()
+    return "", 204
+
+
 if __name__ == "__main__":
     app.run(debug=True, port=5000)

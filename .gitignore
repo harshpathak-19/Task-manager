@@ -1,8 +1,18 @@
-node_modules/
-.next/
+# Environment files
+backend/.env
+frontend/.env
+frontend/.env.local
 .env
-.env.local
+
+# Dependencies
+node_modules/
 __pycache__/
 *.pyc
-venv/
+
+# Next.js build
+frontend/.next/
+.next/
+
+# Misc
 .DS_Store
+*.log

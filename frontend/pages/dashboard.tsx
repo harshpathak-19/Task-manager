@@ -39,6 +39,9 @@ export default function Dashboard() {
     [session]
   );
 
+  // Keep `session` in sync with Supabase — this also picks up the
+  // fresh access_token whenever Supabase auto-refreshes it in the
+  // background, so we stop hitting 401s after ~1 hour.
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       if (!data.session) {
@@ -47,12 +50,40 @@ export default function Dashboard() {
         setSession(data.session);
       }
     });
+
+    const { data: listener } = supabase.auth.onAuthStateChange(
+      (_event, newSession) => {
+        if (!newSession) {
+          router.replace("/");
+        } else {
+          setSession(newSession);
+        }
+      }
+    );
+
+    return () => {
+      listener.subscription.unsubscribe();
+    };
   }, [router]);
 
   useEffect(() => {
     if (!session) return;
-    authedFetch("/api/tasks").then((r) => r.json()).then(setTasks);
-    authedFetch("/api/users").then((r) => r.json()).then(setUsers);
+
+    authedFetch("/api/tasks").then(async (r) => {
+      if (!r.ok) {
+        setTasks([]);
+        return;
+      }
+      setTasks(await r.json());
+    });
+
+    authedFetch("/api/users").then(async (r) => {
+      if (!r.ok) {
+        setUsers([]);
+        return;
+      }
+      setUsers(await r.json());
+    });
   }, [session, authedFetch]);
 
   const createTask = async (e: React.FormEvent) => {
@@ -62,6 +93,7 @@ export default function Dashboard() {
       method: "POST",
       body: JSON.stringify({ title, description, assigned_to: assignTo || null }),
     });
+    if (!res.ok) return;
     const newTask = await res.json();
     setTasks([newTask, ...tasks]);
     setTitle("");
@@ -71,8 +103,15 @@ export default function Dashboard() {
 
   const completeTask = async (id: string) => {
     const res = await authedFetch(`/api/tasks/${id}/complete`, { method: "POST" });
+    if (!res.ok) return;
     const updated = await res.json();
     setTasks(tasks.map((t) => (t.id === id ? updated : t)));
+  };
+
+  const deleteTask = async (id: string) => {
+    const res = await authedFetch(`/api/tasks/${id}`, { method: "DELETE" });
+    if (!res.ok) return;
+    setTasks(tasks.filter((t) => t.id !== id));
   };
 
   const logout = async () => {
@@ -83,29 +122,34 @@ export default function Dashboard() {
   if (!session) return null;
 
   return (
-    <main style={{ maxWidth: 640, margin: "40px auto", fontFamily: "sans-serif" }}>
-      <div style={{ display: "flex", justifyContent: "space-between" }}>
-        <h1>My Tasks</h1>
-        <button onClick={logout}>Log out</button>
+    <main className="max-w-2xl mx-auto mt-10 px-4 font-sans">
+      <div className="flex justify-between items-center mb-8">
+        <h1 className="text-2xl font-bold text-gray-900">My Tasks</h1>
+        <button
+          onClick={logout}
+          className="text-sm border border-gray-300 rounded-lg px-4 py-2 hover:bg-gray-50"
+        >
+          Log out
+        </button>
       </div>
 
-      <form onSubmit={createTask} style={{ marginBottom: 32 }}>
+      <form onSubmit={createTask} className="mb-8 space-y-3">
         <input
           placeholder="Task title"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          style={{ width: "100%", padding: 8, marginBottom: 8 }}
+          className="w-full border border-gray-300 rounded-lg px-3 py-2"
         />
         <textarea
           placeholder="Description"
           value={description}
           onChange={(e) => setDescription(e.target.value)}
-          style={{ width: "100%", padding: 8, marginBottom: 8 }}
+          className="w-full border border-gray-300 rounded-lg px-3 py-2"
         />
         <select
           value={assignTo}
           onChange={(e) => setAssignTo(e.target.value)}
-          style={{ width: "100%", padding: 8, marginBottom: 8 }}
+          className="w-full border border-gray-300 rounded-lg px-3 py-2"
         >
           <option value="">Assign to... (optional)</option>
           {users.map((u) => (
@@ -114,34 +158,47 @@ export default function Dashboard() {
             </option>
           ))}
         </select>
-        <button type="submit">Create task</button>
+        <button
+          type="submit"
+          className="bg-blue-600 hover:bg-blue-700 text-white font-medium px-4 py-2 rounded-lg"
+        >
+          Create task
+        </button>
       </form>
 
-      <ul style={{ listStyle: "none", padding: 0 }}>
-        {tasks.map((t) => (
-          <li
-            key={t.id}
-            style={{
-              border: "1px solid #ddd",
-              borderRadius: 8,
-              padding: 12,
-              marginBottom: 10,
-              opacity: t.status === "completed" ? 0.6 : 1,
-            }}
-          >
-            <strong>{t.title}</strong> — {t.status}
-            <p style={{ margin: "4px 0" }}>{t.description}</p>
-            <small>
-              Assigned to: {t.assignee?.email || "unassigned"} · Created by:{" "}
-              {t.creator?.email}
-            </small>
-            {t.status === "pending" && (
-              <div>
-                <button onClick={() => completeTask(t.id)}>Mark complete</button>
+      <ul className="list-none p-0 space-y-3">
+        {Array.isArray(tasks) &&
+          tasks.map((t) => (
+            <li
+              key={t.id}
+              className={`border border-gray-200 rounded-lg p-3 ${
+                t.status === "completed" ? "opacity-60" : ""
+              }`}
+            >
+              <strong>{t.title}</strong> — {t.status}
+              <p className="my-1 text-gray-700">{t.description}</p>
+              <small className="text-gray-500">
+                Assigned to: {t.assignee?.email || "unassigned"} · Created by:{" "}
+                {t.creator?.email}
+              </small>
+              <div className="mt-2 space-x-2">
+                {t.status === "pending" && (
+                  <button
+                    onClick={() => completeTask(t.id)}
+                    className="text-sm bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded-lg"
+                  >
+                    Mark complete
+                  </button>
+                )}
+                <button
+                  onClick={() => deleteTask(t.id)}
+                  className="text-sm bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded-lg"
+                >
+                  Delete
+                </button>
               </div>
-            )}
-          </li>
-        ))}
+            </li>
+          ))}
       </ul>
     </main>
   );
